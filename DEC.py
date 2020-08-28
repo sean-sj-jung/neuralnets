@@ -87,58 +87,58 @@ def DEC_loss_func(feat):
     loss = F.kl_div(log_q, p, reduction='batchmean')
     return loss, p
 
+if __name__=="__main__":
+    # read data here
+    with open('data.pickle', 'rb') as pp:
+        data = pickle.load(data)
 
-# read data here
-with open('data.pickle', 'rb') as pp:
-    data = pickle.load(data)
-    
-# load pre-trained encoder-decoder
-endn_dense = EncoDeco().to(device)
-endn_dense.load_state_dict(torch.load('saved_model.pt'))
+    # load pre-trained encoder-decoder
+    endn_dense = EncoDeco().to(device)
+    endn_dense.load_state_dict(torch.load('saved_model.pt'))
 
-numClust = 20
-dataset_all = Clust_Dataset(df)
-data_loader = DataLoader(dataset_all, batch_size=2048, num_workers=1, pin_memory=True)
+    numClust = 20
+    dataset_all = Clust_Dataset(df)
+    data_loader = DataLoader(dataset_all, batch_size=2048, num_workers=1, pin_memory=True)
 
-x_init = data[:100].cuda()
-feat_init, _ = endn_dense(x_init)
+    x_init = data[:100].cuda()
+    feat_init, _ = endn_dense(x_init)
 
-kmeans = KMeans(n_clusters=numClust, n_init=7)
-y_pred_init = kmeans.fit_predict(feat_init.cpu().detach().numpy())
-cluster_centers = torch.from_numpy(kmeans.cluster_centers_).type(torch.FloatTensor).cuda().requires_grad_()
+    kmeans = KMeans(n_clusters=numClust, n_init=7)
+    y_pred_init = kmeans.fit_predict(feat_init.cpu().detach().numpy())
+    cluster_centers = torch.from_numpy(kmeans.cluster_centers_).type(torch.FloatTensor).cuda().requires_grad_()
 
 
-ClustOptim = torch.optim.SGD(list(endn_dense.parameters()) + [cluster_centers], lr=0.05)
-endn_dense.train()
-silScore = []
-decLoss = []
-for epoch in range(20):
-    for X in data_loader:
-        X = X.to(device)
-        
-        ClustOptim.zero_grad()
-        
-        clust_feat, _ = endn_dense(X)
-        DEC_loss, _ = DEC_loss_func(clust_feat)
-        
-        DEC_loss.backward()
-        ClustOptim.step()
+    ClustOptim = torch.optim.SGD(list(endn_dense.parameters()) + [cluster_centers], lr=0.05)
+    endn_dense.train()
+    silScore = []
+    decLoss = []
+    for epoch in range(20):
+        for X in data_loader:
+            X = X.to(device)
 
-    sample_feat = clust_feat.cpu().detach().numpy()
-    sample_kmeans = kmeans.predict(clust_feat.cpu().detach().numpy())
-    
-    silScore.append(silhouette_score(sample_feat, sample_kmeans)) 
-    decLoss.append(DEC_loss.detach().item())
+            ClustOptim.zero_grad()
+
+            clust_feat, _ = endn_dense(X)
+            DEC_loss, _ = DEC_loss_func(clust_feat)
+
+            DEC_loss.backward()
+            ClustOptim.step()
+
+        sample_feat = clust_feat.cpu().detach().numpy()
+        sample_kmeans = kmeans.predict(clust_feat.cpu().detach().numpy())
+
+        silScore.append(silhouette_score(sample_feat, sample_kmeans)) 
+        decLoss.append(DEC_loss.detach().item())
 
     print(' epoch', '%03d' %epoch, 
           ' loss:', '%.6f' %(DEC_loss.detach().item()*100),
           ' SilScore:', '%.6f' %silhouette_score(sample_feat, sample_kmeans))
 
 
-with torch.no_grad():
-    clust_feat = []
-    for px, user in data_loader:
-        px = px.to(device)
-        px_h = endn_dense.encoder(px)
-        clust_feat.append(px_h)
-clust_feat_out = torch.cat(clust_feat)
+    with torch.no_grad():
+        clust_feat = []
+        for px, user in data_loader:
+            px = px.to(device)
+            px_h = endn_dense.encoder(px)
+            clust_feat.append(px_h)
+    clust_feat_out = torch.cat(clust_feat)
